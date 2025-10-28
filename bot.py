@@ -1,109 +1,65 @@
 import os
-import logging
-from flask import Flask, request, jsonify
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import requests
-import json
+from flask import Flask
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Railway environment variables
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8292852232:AAGk47XqZKocBTT3je-gco0NOPUr1I3TrC0')
+BOT_TOKEN = os.environ['BOT_TOKEN']
 API_URL = "https://pkans.ct.ws/fetch.php"
-PORT = int(os.environ.get('PORT', 5000))
-WEBHOOK_URL = os.environ.get('WEBHOOK_URL', '')
 
-# Flask app for Railway
 app = Flask(__name__)
 
-# Logging setup
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Initialize bot
+application = Application.builder().token(BOT_TOKEN).build()
 
-class AadhaarLookupBot:
-    def __init__(self):
-        self.bot_token = BOT_TOKEN
-        self.application = None
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔍 Aadhaar Lookup Bot\n\n"
+        "Send any Aadhaar number to get details.\n"
+        "Example: 272756137481"
+    )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
     
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start command handler"""
-        user = update.effective_user
-        welcome_text = f"""
-🔍 **Aadhaar Lookup Bot**
-
-Hello {user.first_name}!
-
-I can help you lookup Aadhaar card details using official API.
-
-**How to Use:**
-1. Send an Aadhaar number (12 digits)
-2. Or use /lookup command
-3. Get instant results
-
-**Features:**
-✅ Name & Father's Name
-✅ Mobile Numbers
-✅ Complete Address
-✅ Circle Information
-✅ Fast & Accurate
-
-⚠️ **Note:** For authorized use only.
-        """
+    if text.isdigit() and len(text) == 12:
+        await update.message.reply_text("🔄 Processing...")
         
-        keyboard = [
-            [InlineKeyboardButton("🔍 Lookup Now", callback_data="lookup_now")],
-            [InlineKeyboardButton("📋 How to Use", callback_data="how_to_use")],
-            [InlineKeyboardButton("🔒 Privacy", callback_data="privacy")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(welcome_text, reply_markup=reply_markup)
-    
-    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Help command handler"""
-        help_text = """
-📖 **How to Use This Bot:**
+        try:
+            response = requests.get(f"{API_URL}?aadhaar={text}", timeout=30)
+            
+            if response.status_code == 200:
+                result = f"🔍 Aadhaar: {text}\n\n"
+                result += "📊 Data Found:\n"
+                result += f"```\n{response.text}\n```"
+                
+                await update.message.reply_text(result)
+            else:
+                await update.message.reply_text("❌ API Error - Please try again")
+                
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {str(e)}")
+    else:
+        await update.message.reply_text("❌ Please send a valid 12-digit Aadhaar number")
 
-**Method 1:**
-Simply send the 12-digit Aadhaar number directly to me.
+# Setup handlers
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-**Method 2:**
-Use /lookup command followed by Aadhaar number.
+@app.route('/')
+def home():
+    return "🤖 Aadhaar Lookup Bot is Running!"
 
-**Example:**
-`/lookup 272756137481`
-Or just send:
-`272756137481`
+@app.route('/health')
+def health():
+    return "✅ Healthy"
 
-**Information You'll Get:**
-• Full Name
-• Father's Name  
-• Mobile Numbers
-• Complete Address
-• Circle & Location
-
-🔒 **Privacy:** Your data is secure and not stored.
-        """
-        await update.message.reply_text(help_text)
-    
-    async def lookup_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Lookup command handler"""
-        if not context.args:
-            await update.message.reply_text(
-                "📝 Usage: /lookup <Aadhaar Number>\n\n"
-                "Example: /lookup 272756137481"
-            )
-            return
-        
-        aadhaar_number = context.args[0]
-        await self.process_aadhaar_lookup(update, aadhaar_number)
-    
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle direct messages containing Aadhaar numbers"""
-        message_text = update.message.text.strip()
-        
+# Railway will use this
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    application.run_polling()
+    app.run(host='0.0.0.0', port=port)        
         # Check if message is a 12-digit number (Aadhaar)
         if message_text.isdigit() and len(message_text) == 12:
             await self.process_aadhaar_lookup(update, message_text)
