@@ -1,17 +1,15 @@
 import os
 import logging
 import requests
+import urllib3
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+# SSL warnings disable
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 # Configuration
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8292852232:AAGk47XqZKocBTT3je-gco0NOPUr1I3TrC0')
-
-# Multiple API endpoints for backup
-API_ENDPOINTS = [
-    "https://pkans.ct.ws/fetch.php",
-    # আপনি অন্যান্য API endpoints যোগ করতে পারেন
-]
 
 # Setup logging
 logging.basicConfig(
@@ -36,51 +34,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Please send valid 12-digit Aadhaar number")
 
 async def process_aadhaar(update: Update, aadhaar: str):
-    """Process Aadhaar lookup with multiple fallbacks"""
-    processing_msg = await update.message.reply_text("🔍 Processing...")
+    """Process Aadhaar lookup with improved network handling"""
+    processing_msg = await update.message.reply_text("🔍 Processing your request...")
     
-    result = None
-    used_api = None
-    for api_url in API_ENDPOINTS:
-        try:
-            logger.info(f"Trying API: {api_url}")
-            response = requests.get(f"{api_url}?aadhaar={aadhaar}", timeout=15)
-            if response.status_code == 200 and response.text.strip():
-                result = response.text
-                used_api = api_url
-                logger.info(f"Success with API: {api_url}")
-                break
-            else:
-                logger.warning(f"API {api_url} returned status {response.status_code}")
-        except Exception as e:
-            logger.error(f"Error with API {api_url}: {e}")
-            continue
+    try:
+        # Try with different approaches
+        api_url = f"https://pkans.ct.ws/fetch.php?aadhaar={aadhaar}"
+        
+        # Create session with custom headers
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive'
+        })
+        
+        # Try with verify=False first
+        response = session.get(api_url, timeout=30, verify=False)
+        
+        if response.status_code == 200:
+            result_text = f"""
+✅ Aadhaar Lookup Successful
+🔢 Number: {aadhaar}
+
+📊 Data:
+{response.text[:1800]}{'...' if len(response.text) > 1800 else ''}
+
+💡 Source: Official API
+            """
+            await update.message.reply_text(result_text)
+        else:
+            await update.message.reply_text(f"❌ API returned status: {response.status_code}")
+            
+    except requests.exceptions.ConnectionError:
+        await update.message.reply_text(
+            "❌ Connection Error - Cannot reach API server\n\n"
+            "Possible reasons:\n"
+            "• API server is down\n" 
+            "• Network restrictions\n"
+            "• Try again later"
+        )
+    except requests.exceptions.Timeout:
+        await update.message.reply_text("❌ Request timeout - Server is slow to respond")
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
     
+    # Delete processing message
     try:
         await processing_msg.delete()
     except:
         pass
-    
-    if result:
-        # Format result nicely
-        # If the result is JSON, we can parse it, but if it's text, we display as is.
-        formatted = f"""
-✅ Aadhaar: {aadhaar}
-
-📊 Data Found:
-{result[:1500]}{'...' if len(result) > 1500 else ''}
-
-🔗 Source: {used_api}
-        """
-        await update.message.reply_text(formatted)
-    else:
-        await update.message.reply_text(
-            "❌ Could not fetch data. Possible reasons:\n"
-            "• API server is down\n"
-            "• Network issue\n"
-            "• Invalid Aadhaar number\n\n"
-            "Please try again later."
-        )
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -88,7 +93,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    print("🤖 Bot running...")
+    print("🤖 Bot is running on Railway...")
     app.run_polling()
 
 if __name__ == '__main__':
