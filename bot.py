@@ -10,7 +10,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '8292852232:AAGk47XqZKocBTT3je-gco0NOPUr
 # Multiple API endpoints for backup
 API_ENDPOINTS = [
     "https://pkans.ct.ws/fetch.php",
-    "https://example-backup-api.com/fetch.php",  # Add backup API if available
+    # আপনি অন্যান্য API endpoints যোগ করতে পারেন
 ]
 
 # Setup logging
@@ -18,6 +18,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -39,13 +40,20 @@ async def process_aadhaar(update: Update, aadhaar: str):
     processing_msg = await update.message.reply_text("🔍 Processing...")
     
     result = None
+    used_api = None
     for api_url in API_ENDPOINTS:
         try:
+            logger.info(f"Trying API: {api_url}")
             response = requests.get(f"{api_url}?aadhaar={aadhaar}", timeout=15)
             if response.status_code == 200 and response.text.strip():
                 result = response.text
+                used_api = api_url
+                logger.info(f"Success with API: {api_url}")
                 break
-        except:
+            else:
+                logger.warning(f"API {api_url} returned status {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error with API {api_url}: {e}")
             continue
     
     try:
@@ -55,11 +63,14 @@ async def process_aadhaar(update: Update, aadhaar: str):
     
     if result:
         # Format result nicely
+        # If the result is JSON, we can parse it, but if it's text, we display as is.
         formatted = f"""
 ✅ Aadhaar: {aadhaar}
 
 📊 Data Found:
 {result[:1500]}{'...' if len(result) > 1500 else ''}
+
+🔗 Source: {used_api}
         """
         await update.message.reply_text(formatted)
     else:
